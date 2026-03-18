@@ -32,7 +32,9 @@ You can switch to the weekly view by clicking the button 'Weekly view', it will 
 <img width="638" height="388" alt="image" src="https://github.com/user-attachments/assets/e113fd45-9f3b-4797-b042-5db650b9f8dd" />
 
 The billing dashboard looks like this:
+
 <img width="633" height="320" alt="image" src="https://github.com/user-attachments/assets/4136212b-b4bd-43a2-abd4-ca9ea04355c3" />
+
 Selecting a person gives their usage/booking history for the month. You can generate the invoce using the blue button:
 
 <img width="464" height="404" alt="image" src="https://github.com/user-attachments/assets/af92d829-045a-4b44-8b3a-c5796db94fa6" />
