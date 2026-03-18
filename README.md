@@ -46,3 +46,42 @@ It generates an output like this which can be saved as a pdf:
 You can also opt for a weekly usage breakdown and generate the corresponding invoice:
 
 <img width="479" height="418" alt="image" src="https://github.com/user-attachments/assets/345fb1bd-ff62-4fa4-a3b9-000bd54a9c6c" />
+
+# Notes:
+This system uses the data that the booking plugin stores in the wp databases. If you wish to use a different plugin, most of the code remains unchanged, just switch out these lines to point to the correct databases:
+
+**Calendar View (calendar_view_php.txt), Monthly view — lines 231–243:**
+
+FROM {$wpdb->prefix}amelia_appointments a
+
+LEFT JOIN {$wpdb->prefix}amelia_customer_bookings cb ON a.id = cb.appointmentId
+
+LEFT JOIN {$wpdb->prefix}amelia_users u ON cb.customerId = u.id
+
+
+**Calendar View (calendar_view_php.txt), Weekly view — lines 357–369: (same structure, different date range):**
+
+FROM {$wpdb->prefix}amelia_appointments a
+
+LEFT JOIN {$wpdb->prefix}amelia_customer_bookings cb ON a.id = cb.appointmentId
+
+LEFT JOIN {$wpdb->prefix}amelia_users u ON cb.customerId = u.id
+
+
+**Billing Module (Billing_module_php.txt), Customer dropdown — lines 26–31:**
+
+FROM {$wpdb->prefix}amelia_users u
+
+INNER JOIN {$wpdb->prefix}amelia_customer_bookings cb ON u.id = cb.customerId
+
+
+**Billing Module (Billing_module_php.txt), Billing data — lines 578–592:**
+
+FROM {$wpdb->prefix}amelia_appointments a
+
+INNER JOIN {$wpdb->prefix}amelia_customer_bookings cb ON a.id = cb.appointmentId
+
+LEFT JOIN {$wpdb->prefix}amelia_services s ON a.serviceId = s.id
+
+
+**Finally, Column names pulled from these tables (bookingStart, bookingEnd, serviceId, customerId, firstName, lastName, price, name) are also Amelia-specific and may differ in other plugins.**
