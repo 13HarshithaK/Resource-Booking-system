@@ -1,0 +1,465 @@
+/**
+ * AMELIA CUSTOM CALENDAR SHORTCODE
+ * This creates a custom calendar view with monthly and weekly displays
+ * Pulls appointment data from Amelia's database tables
+ * Usage: [amelia_custom_calendar]
+ */
+function amelia_custom_calendar_shortcode() {
+    global $wpdb; // WordPress database object - lets us query the database
+    
+    // GET PARAMETERS FROM URL
+    // Example: ?view=weekly&month=2&year=2024
+    $view = isset($_GET['view']) ? $_GET['view'] : 'monthly'; // Default to monthly view
+    $month = isset($_GET['month']) ? intval($_GET['month']) : date('n'); // Current month if not specified
+    $year = isset($_GET['year']) ? intval($_GET['year']) : date('Y'); // Current year if not specified
+    $week_start = isset($_GET['week']) ? $_GET['week'] : date('Y-m-d', strtotime('monday this week')); // Monday of current week
+    
+    // START OUTPUT BUFFERING
+    // ob_start() captures all output (HTML, CSS) so we can return it as a string instead of printing directly
+    ob_start();
+    ?>
+    
+    <!-- INLINE CSS STYLES FOR CALENDAR -->
+    <style>
+        /* Main container for entire calendar */
+        .amelia-calendar {
+            max-width: 1200px;
+            margin: 20px auto;
+            font-family: Arial, sans-serif;
+        }
+        
+        /* Tab buttons to switch between monthly/weekly views */
+        .view-tabs {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .view-tab {
+            padding: 10px 20px;
+            background: #f5f5f5;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+            color: #333;
+            border-radius: 3px;
+        }
+        .view-tab.active {
+            background: #0073aa; /* Blue background for active tab */
+            color: white;
+        }
+        
+        /* Header section with navigation and title */
+        .calendar-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            background: #f5f5f5;
+        }
+        .calendar-header h2 {
+            margin: 0;
+        }
+        .calendar-nav a {
+            padding: 5px 10px;
+            background: #0073aa;
+            color: white;
+            text-decoration: none;
+            margin: 0 5px;
+            border-radius: 3px;
+        }
+        
+        /* MONTHLY VIEW STYLES */
+        /* CSS Grid for calendar - 7 columns (one per day of week) */
+        .calendar-grid {
+            display: grid;
+            grid-template-columns: repeat(7, 1fr);
+            gap: 1px;
+            background: #ddd;
+            border: 1px solid #ddd;
+        }
+        
+        /* Day headers (Sun, Mon, Tue, etc.) */
+        .calendar-day-header {
+            background: #333;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        /* Individual day cells */
+        .calendar-day {
+            background: white;
+            min-height: 100px;
+            padding: 5px;
+            position: relative;
+            cursor: pointer; /* Shows hand cursor on hover */
+            transition: background 0.2s; /* Smooth color transition */
+        }
+        .calendar-day:hover {
+            background: #f0f8ff; /* Light blue on hover */
+        }
+        .calendar-day.empty {
+            background: #f9f9f9; /* Gray background for empty cells (days from previous/next month) */
+            cursor: default;
+        }
+        .calendar-day.unavailable {
+            background: #f5f5f5; /* Light gray for unavailable days */
+            opacity: 0.7;
+        }
+        
+        /* Day number (1, 2, 3, etc.) */
+        .day-number {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        /* Individual appointment display in monthly view */
+        .appointment {
+            background: #0073aa;
+            color: white;
+            padding: 3px 5px;
+            margin: 2px 0;
+            font-size: 12px;
+            border-radius: 3px;
+        }
+        
+        /* WEEKLY VIEW STYLES */
+        /* Grid with 8 columns: time labels + 7 days */
+        .week-grid {
+            display: grid;
+            grid-template-columns: 80px repeat(7, 1fr); /* First column narrower for time labels */
+            gap: 1px;
+            background: #ddd;
+            border: 1px solid #ddd;
+        }
+        
+        /* Time labels in left column (9 AM, 10 AM, etc.) */
+        .time-label {
+            background: #333;
+            color: white;
+            padding: 10px 5px;
+            text-align: center;
+            font-size: 12px;
+            font-weight: bold;
+        }
+        
+        /* Day headers in weekly view */
+        .week-day-header {
+            background: #555;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-weight: bold;
+        }
+        
+        /* Individual time slot cells */
+        .timeslot {
+            background: white;
+            padding: 5px;
+            min-height: 40px;
+            border: 1px solid #eee;
+            position: relative;
+        }
+        .timeslot.available {
+            background: #e8f5e9; /* Green tint for available slots */
+        }
+        .timeslot.booked {
+            background: #ffebee; /* Red tint for booked slots */
+        }
+        .timeslot.unavailable {
+            background: #e0e0e0; /* Gray for unavailable (weekends, after hours) */
+        }
+        
+        /* Content inside timeslots */
+        .timeslot-content {
+            font-size: 11px;
+        }
+        .customer-name {
+            font-weight: bold;
+            color: #c62828;
+        }
+    </style>
+    
+    <!-- MAIN CALENDAR CONTAINER -->
+    <div class="amelia-calendar">
+        <!-- VIEW TOGGLE TABS -->
+        <div class="view-tabs">
+            <!-- Monthly view tab - adds 'active' class if current view -->
+            <a href="?view=monthly&month=<?php echo $month; ?>&year=<?php echo $year; ?>" 
+               class="view-tab <?php echo $view === 'monthly' ? 'active' : ''; ?>">
+                Monthly View
+            </a>
+            <!-- Weekly view tab -->
+            <a href="?view=weekly&week=<?php echo $week_start; ?>" 
+               class="view-tab <?php echo $view === 'weekly' ? 'active' : ''; ?>">
+                Weekly View
+            </a>
+        </div>
+        
+        <?php 
+        // RENDER APPROPRIATE VIEW based on selected tab
+        if ($view === 'monthly'): 
+            echo render_monthly_view($wpdb, $month, $year, $week_start);
+        else: 
+            echo render_weekly_view($wpdb, $week_start);
+        endif; 
+        ?>
+    </div>
+    <?php
+    // RETURN CAPTURED OUTPUT as a string
+    return ob_get_clean();
+}
+
+/**
+ * RENDER MONTHLY CALENDAR VIEW
+ * Creates a traditional month grid with appointments shown on their dates
+ * 
+ * @param object $wpdb - WordPress database object
+ * @param int $month - Month number (1-12)
+ * @param int $year - Year (e.g., 2024)
+ * @param string $current_week - Currently selected week (not used here but passed for consistency)
+ */
+function render_monthly_view($wpdb, $month, $year, $current_week) {
+    // CALCULATE FIRST AND LAST DAY OF MONTH
+    $first_day = "$year-$month-01"; // e.g., "2024-02-01"
+    $last_day = date('Y-m-t', strtotime($first_day)); // 't' gives last day of month (28, 29, 30, or 31)
+    
+    // QUERY DATABASE FOR APPOINTMENTS IN THIS MONTH
+    // $wpdb->prepare() prevents SQL injection by safely escaping variables
+    $appointments = $wpdb->get_results($wpdb->prepare("
+        SELECT 
+            a.id,
+            a.bookingStart,
+            a.bookingEnd,
+            u.firstName,
+            u.lastName
+        FROM {$wpdb->prefix}amelia_appointments a
+        LEFT JOIN {$wpdb->prefix}amelia_customer_bookings cb ON a.id = cb.appointmentId
+        LEFT JOIN {$wpdb->prefix}amelia_users u ON cb.customerId = u.id
+        WHERE DATE(a.bookingStart) BETWEEN %s AND %s
+        ORDER BY a.bookingStart ASC
+    ", $first_day, $last_day));
+    
+    // ORGANIZE APPOINTMENTS BY DATE
+    // Creates an array like: ['2024-02-15' => [appointment1, appointment2], '2024-02-16' => [appointment3]]
+    $appointments_by_date = array();
+    foreach ($appointments as $apt) {
+        $date = date('Y-m-d', strtotime($apt->bookingStart)); // Extract just the date part
+        if (!isset($appointments_by_date[$date])) {
+            $appointments_by_date[$date] = array(); // Initialize array for this date if doesn't exist
+        }
+        $appointments_by_date[$date][] = $apt; // Add appointment to this date's array
+    }
+    
+    // START OUTPUT BUFFERING for this view
+    ob_start();
+    ?>
+    
+    <!-- CALENDAR HEADER WITH NAVIGATION -->
+    <div class="calendar-header">
+        <div class="calendar-nav">
+            <?php
+            // CALCULATE PREVIOUS MONTH
+            $prev_month = $month - 1;
+            $prev_year = $year;
+            if ($prev_month < 1) { // If we're in January, go back to December of previous year
+                $prev_month = 12;
+                $prev_year--;
+            }
+            
+            // CALCULATE NEXT MONTH
+            $next_month = $month + 1;
+            $next_year = $year;
+            if ($next_month > 12) { // If we're in December, advance to January of next year
+                $next_month = 1;
+                $next_year++;
+            }
+            ?>
+            <!-- Navigation links -->
+            <a href="?view=monthly&month=<?php echo $prev_month; ?>&year=<?php echo $prev_year; ?>">← Previous</a>
+            <a href="?view=monthly&month=<?php echo $next_month; ?>&year=<?php echo $next_year; ?>">Next →</a>
+        </div>
+        <!-- Display month name and year (e.g., "February 2024") -->
+        <h2><?php echo date('F Y', strtotime($first_day)); ?></h2>
+    </div>
+    
+    <!-- CALENDAR GRID -->
+    <div class="calendar-grid">
+        <?php
+        // DAY OF WEEK HEADERS (Sun, Mon, Tue, etc.)
+        $days = array('Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat');
+        foreach ($days as $day) {
+            echo "<div class='calendar-day-header'>$day</div>";
+        }
+        
+        // CALCULATE CALENDAR LAYOUT
+        $start_day = date('w', strtotime($first_day)); // Day of week first day falls on (0=Sunday, 6=Saturday)
+        $days_in_month = date('t', strtotime($first_day)); // Total days in this month
+        
+        // EMPTY CELLS BEFORE MONTH STARTS
+        // If month starts on Wednesday (3), we need 3 empty cells for Sun, Mon, Tue
+        for ($i = 0; $i < $start_day; $i++) {
+            echo "<div class='calendar-day empty'></div>";
+        }
+        
+        // DAYS OF THE MONTH
+        for ($day = 1; $day <= $days_in_month; $day++) {
+            $current_date = sprintf('%04d-%02d-%02d', $year, $month, $day); // Format: "2024-02-15"
+            $week_of_date = date('Y-m-d', strtotime('monday this week', strtotime($current_date))); // Find Monday of this week
+            
+            // CHECK IF DAY IS UNAVAILABLE (weekends in this case)
+            $day_of_week = date('w', strtotime($current_date)); // 0=Sunday, 6=Saturday
+            $is_weekend = ($day_of_week == 0 || $day_of_week == 6);
+            $unavailable_class = $is_weekend ? 'unavailable' : '';
+            
+            // CREATE DAY CELL - clicking it goes to weekly view for that week
+            echo "<div class='calendar-day $unavailable_class' onclick='window.location.href=\"?view=weekly&week=$week_of_date\"'>";
+            
+            // Display day number
+            echo "<div class='day-number'>$day</div>";
+            
+            // DISPLAY APPOINTMENTS FOR THIS DAY (if any exist)
+            if (isset($appointments_by_date[$current_date])) {
+                foreach ($appointments_by_date[$current_date] as $apt) {
+                    $time = date('g:i A', strtotime($apt->bookingStart)); // Format time as "2:30 PM"
+                    $name = $apt->firstName . ' ' . $apt->lastName;
+                    echo "<div class='appointment'>";
+                    echo "<div>$time</div>";
+                    echo "<div>$name</div>";
+                    echo "</div>";
+                }
+            }
+            
+            echo "</div>"; // Close day cell
+        }
+        ?>
+    </div>
+    <?php
+    // Return captured HTML
+    return ob_get_clean();
+}
+
+/**
+ * RENDER WEEKLY CALENDAR VIEW
+ * Shows a time-slot grid for one week (Monday-Sunday)
+ * Each hour is a row, each day is a column
+ * 
+ * @param object $wpdb - WordPress database object
+ * @param string $week_start - Date of Monday for this week (e.g., "2024-02-12")
+ */
+function render_weekly_view($wpdb, $week_start) {
+    // CALCULATE WEEK END DATE (Sunday)
+    $week_end = date('Y-m-d', strtotime($week_start . ' +6 days'));
+    
+    // QUERY APPOINTMENTS FOR THIS WEEK
+    $appointments = $wpdb->get_results($wpdb->prepare("
+        SELECT 
+            a.id,
+            a.bookingStart,
+            a.bookingEnd,
+            u.firstName,
+            u.lastName
+        FROM {$wpdb->prefix}amelia_appointments a
+        LEFT JOIN {$wpdb->prefix}amelia_customer_bookings cb ON a.id = cb.appointmentId
+        LEFT JOIN {$wpdb->prefix}amelia_users u ON cb.customerId = u.id
+        WHERE DATE(a.bookingStart) BETWEEN %s AND %s
+        ORDER BY a.bookingStart ASC
+    ", $week_start, $week_end));
+    
+    // ORGANIZE APPOINTMENTS BY DATE AND HOUR
+    // Creates keys like: "2024-02-15_14" for Feb 15 at 2 PM (14:00)
+    $appointments_by_slot = array();
+    foreach ($appointments as $apt) {
+        $date = date('Y-m-d', strtotime($apt->bookingStart));
+        $hour = date('H', strtotime($apt->bookingStart)); // 24-hour format (00-23)
+        $key = $date . '_' . $hour;
+        $appointments_by_slot[$key] = $apt; // Store appointment in this slot
+    }
+    
+    ob_start();
+    ?>
+    
+    <!-- WEEK HEADER WITH NAVIGATION -->
+    <div class="calendar-header">
+        <div class="calendar-nav">
+            <?php
+            // Calculate previous and next week dates
+            $prev_week = date('Y-m-d', strtotime($week_start . ' -7 days'));
+            $next_week = date('Y-m-d', strtotime($week_start . ' +7 days'));
+            ?>
+            <a href="?view=weekly&week=<?php echo $prev_week; ?>">← Previous Week</a>
+            <a href="?view=weekly&week=<?php echo $next_week; ?>">Next Week →</a>
+        </div>
+        <h2>Week of <?php echo date('M d, Y', strtotime($week_start)); ?></h2>
+    </div>
+    
+    <!-- WEEKLY GRID -->
+    <div class="week-grid">
+        <!-- CORNER CELL (empty, just says "Time") -->
+        <div class="time-label">Time</div>
+        
+        <!-- DAY HEADERS (Mon Feb 12, Tue Feb 13, etc.) -->
+        <?php
+        for ($i = 0; $i < 7; $i++) {
+            $current_day = date('Y-m-d', strtotime($week_start . " +$i days"));
+            $day_name = date('D M j', strtotime($current_day)); // Format: "Mon Feb 12"
+            echo "<div class='week-day-header'>$day_name</div>";
+        }
+        
+        // TIME SLOTS (9 AM to 5 PM)
+        // Adjust these hours to match your Amelia employee working hours
+        $start_hour = 9;  // 9 AM
+        $end_hour = 17;   // 5 PM (17:00 in 24-hour time)
+        
+        for ($hour = $start_hour; $hour <= $end_hour; $hour++) {
+            // TIME LABEL (left column)
+            $time_label = date('g A', strtotime("$hour:00")); // Format: "9 AM", "2 PM"
+            echo "<div class='time-label'>$time_label</div>";
+            
+            // FOR EACH DAY OF THE WEEK
+            for ($i = 0; $i < 7; $i++) {
+                $current_day = date('Y-m-d', strtotime($week_start . " +$i days"));
+                $slot_key = $current_day . '_' . sprintf('%02d', $hour); // e.g., "2024-02-15_09"
+                
+                // CHECK IF THIS DAY/TIME IS AVAILABLE
+                $day_of_week = date('w', strtotime($current_day)); // 0=Sunday, 6=Saturday
+                $is_weekend = ($day_of_week == 0 || $day_of_week == 6);
+                $is_working_hour = ($hour >= $start_hour && $hour <= $end_hour);
+                
+                // CHECK IF SLOT IS BOOKED
+                if (isset($appointments_by_slot[$slot_key])) {
+                    // SLOT IS BOOKED - show customer info
+                    $apt = $appointments_by_slot[$slot_key];
+                    $name = $apt->firstName . ' ' . $apt->lastName;
+                    $time = date('g:i A', strtotime($apt->bookingStart));
+                    echo "<div class='timeslot booked'>";
+                    echo "<div class='timeslot-content'>";
+                    echo "<div class='customer-name'>BOOKED</div>";
+                    echo "<div>$name</div>";
+                    echo "<div>$time</div>";
+                    echo "</div>";
+                    echo "</div>";
+                } elseif ($is_weekend || !$is_working_hour) {
+                    // SLOT IS UNAVAILABLE - weekend or outside working hours
+                    echo "<div class='timeslot unavailable'>";
+                    echo "<div class='timeslot-content' style='color: #999;'>Unavailable</div>";
+                    echo "</div>";
+                } else {
+                    // SLOT IS AVAILABLE - can be booked
+                    echo "<div class='timeslot available'>";
+                    echo "<div class='timeslot-content'>Available</div>";
+                    echo "</div>";
+                }
+            }
+        }
+        ?>
+    </div>
+    <?php
+    return ob_get_clean();
+}
+
+// REGISTER SHORTCODE
+// This makes [amelia_custom_calendar] work in WordPress pages
+add_shortcode('amelia_custom_calendar', 'amelia_custom_calendar_shortcode');
